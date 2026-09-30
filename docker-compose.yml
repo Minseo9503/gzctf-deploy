@@ -1,0 +1,47 @@
+# GZCTF 로컬 배포 (OCI 호스트 준비 전 임시 로컬 구동용)
+# 프로덕션 이전 시: 이미지 태그 고정, 시크릿 교체, HTTPS 리버스프록시 앞단 권장.
+services:
+  gzctf:
+    # 태그 고정(공지 표준). latest 금지 — 재현성 위해 특정 버전 사용.
+    image: gztime/gzctf:v1.8.7
+    restart: unless-stopped
+    environment:
+      # 시크릿/환경값은 전부 .env 에서 주입 (커밋 파일엔 비밀값 없음).
+      # 아래 __ 표기는 .NET 설정 계층 오버라이드 → appsettings.json 값을 덮어씀.
+      - "GZCTF_ADMIN_PASSWORD=${GZCTF_ADMIN_PASSWORD}"
+      - "ConnectionStrings__Database=Host=db;Port=5432;Database=gzctf;Username=postgres;Password=${DB_PASSWORD}"
+      - "XorKey=${XOR_KEY}"
+      - "ContainerProvider__PublicEntry=${PUBLIC_ENTRY}"
+    ports:
+      - "8080:8080"                     # 웹 UI: http://localhost:8080
+    volumes:
+      - "./appsettings.json:/app/appsettings.json:ro"
+      - "./data/files:/app/files"
+      # 동적 컨테이너 스폰용 도커 소켓. GZCTF 오케스트레이터의 정상 요구사항이며
+      # 문제 컨테이너와는 무관(문제 컨테이너엔 절대 소켓을 마운트하지 않음).
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - gzctf
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      - "POSTGRES_PASSWORD=${DB_PASSWORD}"
+      - "POSTGRES_DB=gzctf"
+    volumes:
+      - "./data/db:/var/lib/postgresql/data"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d gzctf"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - gzctf
+
+networks:
+  gzctf:
+    driver: bridge
